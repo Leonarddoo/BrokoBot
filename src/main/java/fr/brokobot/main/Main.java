@@ -1,79 +1,55 @@
 package fr.brokobot.main;
 
-import fr.brokobot.main.commands.*;
-import fr.brokobot.main.games.ChiFouMi;
-import fr.brokobot.main.games.JustePrix;
-import fr.brokobot.main.setup.CommandsBuilder;
-import fr.brokobot.main.setup.CommandsHandler;
-import fr.brokobot.main.setup.Member;
+import fr.brokobot.main.builder.CommandsBuilder;
+import fr.brokobot.main.commands.Broccoli;
+import fr.brokobot.main.handler.CommandsHandler;
+import fr.brokobot.main.handler.EventHandler;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.entities.Guild;
 
 import javax.security.auth.login.LoginException;
-import java.awt.*;
-import java.util.ArrayList;
+import java.io.IOException;
 import java.util.Calendar;
-import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
 public class Main {
 
-    private static JDA jda;
-
-    private static final Color BLUE = new Color(0, 0, 255);
-    private static final Color GREEN = new Color(20, 184, 42);
-    private static final Color RED = new Color(255, 0, 0);
-
-    private static final String GUILDID = "387304030390583296";
+    private static final String TOKEN = "";
+    private static final String PRESENTATIONCHANNEL = "962704792189304852";
     private static final String BROKOCHANNEL = "962648366234365982";
     private static final String BROKOCATEGORIE = "962697330782502912";
-
-    private static List<String> dailyList = new ArrayList<>();
+    private static final String BROKOPOINTS = "<:brokopoints:962685048748908585> **BrokoPoints**";
+    private static JDA jda;
 
     public static void main(String[] args) throws LoginException {
-        jda = JDABuilder.createDefault("")
+        //On créer le bot
+        jda = JDABuilder.createDefault(TOKEN)
                 .addEventListeners(new CommandsBuilder(),
                         new CommandsHandler(),
-                        new Info(),
-                        new JustePrix(),
-                        new ChiFouMi())
+                        new EventHandler())
                 .build();
-        Member.getSerialize();
-        Timer timer = new Timer();
-        timer.schedule(new TimerTask() {
+
+        //On créer un chrono qui s'execute chaque minute
+        new Timer().schedule(new TimerTask() {
             @Override
             public void run() {
-                if(Calendar.HOUR == 0 && Calendar.MINUTE == 0){
-                    dailyList = new ArrayList<>();
+                try {
+                    //On sauvegarde les données
+                    Player.save();
+                    //On regarde si on change de jour, pour réinitialiser la dailyList
+                    if(Calendar.HOUR == 0 && Calendar.MINUTE == 0){
+                        Broccoli.getDailyList().clear();
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
             }
-        }, 1000, 60000);
+        }, 6000);
     }
 
-    public static JDA getJda() {
-        return jda;
-    }
-
-    public static Color getBLUE() {
-        return BLUE;
-    }
-
-    public static Color getGREEN() {
-        return GREEN;
-    }
-
-    public static Color getRED() {
-        return RED;
-    }
-
-    public static Guild getLC(){
-        return jda.getGuildById(Main.getGUILDID());
-    }
-
-    public static String getGUILDID() {
-        return GUILDID;
+    public static String getPRESENTATIONCHANNEL() {
+        return PRESENTATIONCHANNEL;
     }
 
     public static String getBROKOCHANNEL() {
@@ -84,7 +60,7 @@ public class Main {
         return BROKOCATEGORIE;
     }
 
-    public static List<String> getDailyList() {
-        return dailyList;
+    public static String getBROKOPOINTS() {
+        return BROKOPOINTS;
     }
 }

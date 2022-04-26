@@ -1,196 +1,184 @@
 package fr.brokobot.main.games;
 
 import fr.brokobot.main.Main;
-import fr.brokobot.main.setup.ErrorEmbed;
-import fr.brokobot.main.setup.Member;
+import fr.brokobot.main.Player;
+import fr.brokobot.main.builder.MessageBuilder;
+import fr.brokobot.main.handler.CheckIn;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.Permission;
-import net.dv8tion.jda.api.entities.ChannelType;
-import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.MessageEmbed;
-import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
-import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
-import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import net.dv8tion.jda.api.interactions.components.buttons.Button;
-import org.jetbrains.annotations.NotNull;
+import net.dv8tion.jda.api.entities.*;
 
+import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-public class JustePrix extends ListenerAdapter {
+public class JustePrix {
 
-    private Member member;
+    private Player player;
     private String channel, message;
-    private int number, bet, attemps;
-    private boolean start;
+    private static int number;
+    private int bet;
+    private int attemps;
 
-    private static final List<JustePrix> jpList = new ArrayList<>();
+    private static final List<JustePrix> JUSTE_PRIX_LIST = new ArrayList<>();
 
-    public JustePrix(){}
+    private static final String LOWER = "https://i.imgur.com/PdjoyB6.jpg";
+    private static final String UPPER = "https://i.imgur.com/Dpb8Iwr.jpg";
 
-    public JustePrix(Member m, String c, String msg, int b){
-        this.member = m;
-        this.channel = c;
-        this.message = msg;
-        this.number = new Random().nextInt(999)+1;
+    private static final MessageEmbed startMessage = new EmbedBuilder()
+            .setColor(Color.BLUE)
+            .setDescription("__Règles du jeu :__\n" +
+                    "Le BrokoBot va choisir un nombre entre 1 et 999. Vous aurez 9 tentatives pour trouver ce nombre.\n" +
+                    "Si vous le trouvez, vous remportez le double de votre mise. Dans le cas contraire vous perdez celle-ci.\n" +
+                    "\n" +
+                    "__Fonctionnement :__\n" +
+                    "A chaque fois que vous enverrez un nombre dans ce channel, ce message sera modifié et le BrokoBot vous donnera des indices.\n" +
+                    "Attention ! Tous vos prochains message dans ce channel seront comptés comme des tentatives.\n" +
+                    "\n" +
+                    "*Maintenant que vous connaissez le fontionnement, nous vous souhaitons bonne chance !*")
+            .setImage("https://i.imgur.com/FUtllQy.jpg")
+            .build();
+
+    private static final MessageEmbed channelWillBeCreate = new EmbedBuilder()
+            .setColor(Color.GREEN)
+            .setDescription("Restez attentif ! Un channel va se créer avec votre game.")
+            .build();
+
+    public JustePrix(Player p, int b){
+        this.player = p;
+        this.channel = null;
+        this.message = null;
+        this.number = new Random().nextInt(998)+1;
         this.bet = b;
         this.attemps = 0;
-        this.start = false;
     }
 
-    public static MessageEmbed start(net.dv8tion.jda.api.entities.Member member, int bet){
+    public static MessageEmbed createGame(Guild guild, Member member, int bet){
+        //On recupere le joueur
+        Player player = Player.retrievePlayer(member.getId());
+        //On créer une game de JustePrix
+        JustePrix game = new JustePrix(player, bet);
 
-        if(memberIsPlaying(member.getId())) return ErrorEmbed.getAlreadyIngame();
+        //On regarde si les conditions sont ok pour lancé la partie
+        MessageEmbed ErrorMsg = game.canPlay();
+        if(ErrorMsg != null) return ErrorMsg;
 
-        Member m = Member.getMember(member.getId());
-        MessageEmbed errorMsg = ErrorEmbed.errorGames(m, null, bet);
-        if(errorMsg != null) return errorMsg;
+        //Si c'est le cas on créer un channel, et on envoie le premier message
+        guild.createTextChannel("justeprix-"+member.getEffectiveName(), guild.getCategoryById(Main.getBROKOCATEGORIE()))
+                .syncPermissionOverrides()
+                .addMemberPermissionOverride(member.getIdLong(), Permission.MESSAGE_SEND.getRawValue(), Permission.MANAGE_CHANNEL.getRawValue()).queue(channel -> {
+                    channel.sendMessageEmbeds(startMessage).queue(msg -> {
+                        //On configure le channel et le message de la game
+                        game.channel = channel.getId();
+                        game.message = msg.getId();
+                    });
+                    channel.sendMessage(member.getAsMention()).queue(ping -> {
+                        ping.delete().queue();
+                    });
+                });
+        //On enleve les BrokoPoints de la mise au joueur
+        game.player.setPoints(game.player.getPoints()-game.bet);
+        //On rajoute la game en cours dans la liste
+        JUSTE_PRIX_LIST.add(game);
+        return channelWillBeCreate;
+    }
 
-        Guild guild = Main.getLC();
-        guild.createTextChannel("justeprix-"+member.getEffectiveName(), guild.getCategoryById(Main.getBROKOCATEGORIE())).syncPermissionOverrides()
-                .addMemberPermissionOverride(member.getIdLong(), Permission.MESSAGE_SEND.getRawValue(), Permission.MESSAGE_MANAGE.getRawValue()).queue(channel -> {
-            channel.getManager().setTopic(Integer.toString(bet));
-            channel.sendMessageEmbeds(new EmbedBuilder()
-                            .setTitle("**Partie de : **"+member.getEffectiveName())
-                    .setDescription("**Règles :**\n" +
-                            "Dès que la partie sera lancé, le bot choisira un nombre entre **1** et **1000**.\n" +
-                            "Vous aurez **9 essaies** pour trouver ce nombre et avoir la chance de doubler votre mise.\n" +
-                            "Si ne parvenez pas à trouvez le nombre, vous aurez perdu.\n" +
-                            "\n" +
-                            "**Jouer :**\n" +
-                            "Il vous suffit simplement d'écrire message ne contenant uniquement un nombre!\n" +
-                            "Si le message n'est pas un nombre entre 1 et 1000, cette tentative ne sera pas prise en compte.\n" +
-                            "Ce message sera modifié durant la partie et le bot vous répondra le nombre est plus petit ou plus grand que votre proposition.\n" +
-                            "\n" +
-                            "**Bonne Chance!**")
-                            .setImage("https://i.imgur.com/FUtllQy.jpg")
-                    .build()).setActionRow(Button.success("start", "Lancer la partie!"), Button.danger("cancel", "Annuler")).queue(msg -> {
-                     jpList.add(new JustePrix(m, channel.getId(), msg.getId(), bet));
-            });
-            channel.sendMessage(member.getAsMention()).queue(ping -> {
-                ping.delete().queueAfter(1, TimeUnit.SECONDS);
-            });
+    public static void updateGame(JustePrix game, TextChannel channel, Message message){
+        //Si le message est compose, ce n'est pas un nombre
+        if(message.getContentRaw().split(" ").length > 1) return;
+        int choice;
+        try{
+            //On essaye de récuperer le nombre du message
+            choice = Integer.parseInt(message.getContentRaw());
+        }catch (NumberFormatException e){
+            //Si on y arrive pas on ne fait rien
+            return;
+        }
+
+        //On recupere le message du jeu
+        channel.retrieveMessageById(game.message).queue(msg -> {
+            if(choice == game.number){
+                msg.editMessageEmbeds(winGame(game)).queue();
+                channel.delete().queueAfter(5, TimeUnit.SECONDS);
+                return;
+            }else if(game.attemps < 9){
+                msg.editMessageEmbeds(updateEmbed(game, choice)).queue();
+            }else{
+                msg.editMessageEmbeds(looseGame(game)).queue();
+                channel.delete().queueAfter(5, TimeUnit.SECONDS);
+                return;
+            }
         });
+        //On rajoute une tentative utilisée au joueur
+        game.attemps++;
+        //On supprime message
+        message.delete().queue();
+    }
+
+    public static MessageEmbed updateEmbed(JustePrix game, int msg){
+        //On met l'image correspondant à l'indice
+        String image = null;
+        if(game.number > msg){
+            image = UPPER;
+        }else if(game.number < msg) {
+            image = LOWER;
+        }
+
         return new EmbedBuilder()
-                .setColor(Main.getGREEN())
-                .setDescription("Un channel va se créer pour votre partie.")
+                .setTitle("Partie en cours")
+                .setColor(Color.BLUE)
+                .setDescription("Joueur <@"+game.player.getId()+">\n" +
+                        "Mise :**"+game.bet+"**\n" +
+                        "Tentative Restantes :**"+(9-game.attemps)+"**\n" +
+                        "Dernier Nombre : **"+msg+"**")
+                .setImage(image)
                 .build();
     }
 
-    @Override
-    public void onButtonInteraction(@NotNull ButtonInteractionEvent event) {
-        JustePrix game = retrieveJPbyChannel(event.getChannel().getId());
-        if(game == null) return;
-        if(!event.getUser().getId().equals(game.member.getId())) return;
+    public static MessageEmbed winGame(JustePrix game){
+        //On rajoute les points au joueur
+        game.player.setPoints(game.player.getPoints()+game.bet);
+        //On supprime la game de la liste
+        JUSTE_PRIX_LIST.remove(game);
 
-        if(event.getButton().getId().equals("cancel")){
-            jpList.remove(game);
-            event.getChannel().delete().queue();
-        }else if(event.getButton().getId().equals("start")){
-
-            game.member.removePoints(game.bet);
-            game.start = true;
-
-            event.getTextChannel().retrieveMessageById(game.message).queue(msg -> {
-                msg.editMessageEmbeds(new EmbedBuilder()
-                        .setTitle("La partie a commencé !")
-                        .setColor(Main.getBLUE())
-                        .setDescription("Joueur : <@"+game.member.getId()+">\n" +
-                                "Mise : **"+game.bet+"**\n" +
-                                "Tentatives restantes :** "+ (9 - game.attemps) +"**\n" +
-                                "Dernier nombre : *vide*")
-                        .build()).queue();
-                msg.editMessageComponents().queue();
-            });
-
-            event.reply("Let's go, à toi de jouer !").setEphemeral(true).queue();
-        }
+        return new EmbedBuilder()
+                .setColor(Color.GREEN)
+                .setDescription("Bien joué ! Le nombre était : "+game.number+"\n" +
+                        "Vous remportez donc " + game.bet*2 + Main.getBROKOPOINTS() + "\n" +
+                        "\n" +
+                        "*Ce channel sera automatiquement fermé dans 5 secondes.*")
+                .build();
     }
 
-    @Override
-    public void onMessageReceived(@NotNull MessageReceivedEvent event) {
-        if(event.getAuthor().isBot()) return;
-        if(!event.getChannelType().equals(ChannelType.TEXT)) return;
-        JustePrix game = retrieveJPbyChannel(event.getChannel().getId());
-        if(game == null) return;
-        if(!game.start) return;
-        if(!event.getAuthor().getId().equals(game.member.getId())) return;
-        if(event.getMessage().getContentRaw().split(" ").length > 1) return;
+    public static MessageEmbed looseGame(JustePrix game){
+        //On supprime la game de la liste
+        JUSTE_PRIX_LIST.remove(game);
 
-        try{
-            String image;
-            int num = Integer.parseInt(event.getMessage().getContentRaw());
-            if(num > 0 && num < 1001){
-               game.attemps++;
-            }
-            if(num > game.number){
-                image = "https://i.imgur.com/PdjoyB6.jpg";
-            }else if(num < game.number){
-                image = "https://i.imgur.com/Dpb8Iwr.jpg";
-            }else {
-                game.member.addPoints(game.bet*2);
-                game.member.addWin();
-                event.getChannel().retrieveMessageById(game.message).queue(msg ->{
-                    msg.editMessageEmbeds(new EmbedBuilder()
-                                    .setTitle("Victoire")
-                                    .setColor(Main.getGREEN())
-                                    .setDescription("Bien joué ! Le nombre était bien :**"+game.number+"**\n" +
-                                            "Vous avez remporté <:brokopoints:962685048748908585> **"+(game.bet*2)+"BrokoPoints**\n" +
-                                            "Le channel sera automatiquement fermer dans 5 secondes.")
-                            .build()).queue();
-                });
-                event.getChannel().delete().queueAfter(5, TimeUnit.SECONDS);
-                jpList.remove(game);
-                return;
-            }
-            if(game.attemps == 9){
-                game.member.addLoose();
-                event.getChannel().retrieveMessageById(game.message).queue(msg ->{
-                    msg.editMessageEmbeds(new EmbedBuilder()
-                            .setTitle("Défaite")
-                            .setColor(Main.getRED())
-                            .setDescription("Dommage ! Le nombre était : **"+game.number+"**\n" +
-                                    "Le channel sera automatiquement fermer dans 5 secondes.")
-                            .build()).queue();
-                });
-                event.getChannel().delete().queueAfter(5, TimeUnit.SECONDS);
-                jpList.remove(game);
-                return;
-            }
-
-            event.getChannel().retrieveMessageById(game.message).queue(msg ->{
-                msg.editMessageEmbeds(new EmbedBuilder()
-                        .setTitle("Essaye encore !")
-                        .setColor(Main.getBLUE())
-                        .setDescription("Joueur : <@"+game.member.getId()+">\n" +
-                                "Mise : **"+game.bet+"**\n" +
-                                "Tentatives restantes :**"+ (9 - game.attemps) +"**\n" +
-                                "Dernier nombre : **"+num+"**\n")
-                        .setImage(image)
-                        .build()).queue();
-            });
-
-        }catch (NumberFormatException e){
-            e.printStackTrace();
-        }
-
-        event.getMessage().delete().queue();
+        return new EmbedBuilder()
+                .setColor(Color.RED)
+                .setDescription("Dommage ! Le nombre était : "+game.number+"\n" +
+                        "\n" +
+                        "*Ce channel sera automatiquement fermé dans 5 secondes.*")
+                .build();
     }
 
-    public static boolean memberIsPlaying(String id){
-        for(JustePrix jp : jpList){
-            if(jp.member.getId().equals(id)){
-                return true;
-            }
-        }
-        return false;
+    public MessageEmbed canPlay(){
+        //On initialise un message d'erreur
+        MessageEmbed ErrorMsg;
+        //Onr regarde si il a assez de points pour jouer
+        ErrorMsg = CheckIn.checkPoints(this.player, this.bet);
+        if(ErrorMsg != null) return ErrorMsg;
+        //On regarde si le joueur n'a pas déjà une game de lancé.
+        if(JUSTE_PRIX_LIST.contains(this)) return MessageBuilder.getAlreadyInGame();
+
+        return null;
     }
 
-    public static JustePrix retrieveJPbyChannel(String channel){
-        for(JustePrix jp : jpList){
-            if(jp.channel.equals(channel)){
+    public static JustePrix retrieveJPByChannelID(String id){
+        for(JustePrix jp : JUSTE_PRIX_LIST){
+            if(jp.channel.equals(id)){
                 return jp;
             }
         }
